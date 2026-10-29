@@ -345,7 +345,7 @@
       display: inline-block;
     }
 
-    /* 벌칙 뒤의 숫자 N만 일반모드(녹색) vs 히든모드(노란색) 전환 */
+    /* 벌칙 뒤의 숫자 N만 일반모드(밝은 녹색) vs 히든모드(진한 녹색) 전환 */
     .num-normal {
       color: #4ade80;
     }
@@ -476,7 +476,7 @@
     }
 
     /* ==========================================
-       3. 붉은 바탕 벌칙 팝업 (두 번째 스크린샷 스타일)
+       3. 붉은 바탕 벌칙 팝업
     =========================================== */
     #penaltyPopupOverlay {
       position: absolute;
@@ -562,7 +562,7 @@
     }
 
     /* ==========================================
-       4. 다시시작 화면 (세 번째 스크린샷 스타일)
+       4. 다시시작 화면
     =========================================== */
     #restartOverlay {
       position: absolute;
@@ -646,7 +646,7 @@
     =========================================== -->
     <div id="gameScreen">
 
-      <!-- 상단 중앙 상태바 (게임 중이든 다시시작 화면이든 '벌칙 : N' 클릭 시 녹색/노란색 즉시 토글) -->
+      <!-- 상단 중앙 상태바 ('벌칙 : N' 클릭 시 히든모드 즉시 토글) -->
       <div class="top-banner-wrap">
         <div class="top-status-bar">
           <span class="status-green-text">플레이어 : <span id="statusPlayerNum">4</span>, </span><span id="penaltyToggleArea" onclick="window.toggleHiddenMode(event)"><span class="status-green-text">벌칙 : </span><span id="statusPenaltyNum" class="num-normal">4</span></span>
@@ -786,14 +786,30 @@
     var totalPlayers = 4;
     var defaultPenalties = ["축 통과", "커피 쏘기", "딱밤 맞기", "노래 한 곡"];
     var penaltyInputs = ["축 통과", "커피 쏘기", "딱밤 맞기", "노래 한 곡"];
-    var isHiddenMode = false; // false: 일반모드(녹색 숫자), true: 히든모드(노란색 숫자)
+    var isHiddenMode = false; // false: 일반모드, true: 히든모드
 
     var activeBombs = [];
     var remainingPenalties = [];
-    var floorDoubleTapped = false;
-    var lastFloorTapTime = 0;
-    var lastTouchRecordTime = 0;
     var isBombExploding = false;
+
+    // 히든트릭 발동 제어 변수 (정확히 2번 두드림 or 3초 이상 길게 누름)
+    var floorTrickArmed = false;      // true일 때 다음 첫 번째 폭탄에서 무조건 1번 벌칙 당첨
+    var floorTapCount = 0;            // 빈 공간 연속 두드림 횟수 (2번일 때만 발동, 3번 이상이면 취소)
+    var lastFloorTapTime = 0;         // 마지막으로 빈 공간을 두드린 시각
+    var longPressTimer = null;        // 3초(3000ms) 길게 누름 감지 타이머
+    var isLongPressTriggered = false; // 3초 길게 누름이 달성되었는지 여부
+    var lastTouchRecordTime = 0;      // 모바일 터치 후 중복 포인터 이벤트 방지용
+
+    function resetTrickTriggers() {
+      floorTrickArmed = false;
+      floorTapCount = 0;
+      lastFloorTapTime = 0;
+      isLongPressTriggered = false;
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }
 
     /* ==========================================================
        3D 폭탄 SVG 생성기
@@ -905,13 +921,11 @@
     window.toggleHiddenMode = function(e) {
       if (e && e.stopPropagation) e.stopPropagation();
       isHiddenMode = !isHiddenMode;
-      if (!isHiddenMode) {
-        floorDoubleTapped = false;
-      }
+      resetTrickTriggers();
       updateStatusBannerUI();
     };
 
-    // 상단 상태바 업데이트: 플레이어 수와 벌칙 수가 동일하게 표시되며, 벌칙 뒤의 숫자만 녹색/노란색 전환
+    // 상단 상태바 업데이트
     function updateStatusBannerUI() {
       var pNumEl = document.getElementById('statusPlayerNum');
       var penNumEl = document.getElementById('statusPenaltyNum');
@@ -948,8 +962,7 @@
         });
       }
 
-      floorDoubleTapped = false;
-      lastFloorTapTime = 0;
+      resetTrickTriggers();
       isBombExploding = false;
 
       document.getElementById('penaltyPopupOverlay').style.display = 'none';
@@ -1078,9 +1091,10 @@
     };
 
     /* ==========================================================
-       빈 나무 바닥 두 번 두드리기(더블 탭/더블 클릭) 정밀 감지
-       - 모바일 touchstart, pointerdown, click, dblclick 모두 호환
-       - 500ms 이내에 빈 바닥을 두 번 두드리면 floorDoubleTapped = true
+       빈 나무 바닥 히든트릭 감지
+       1) 빈 공간을 정확히 2번 두드림 (3번 이상 연속으로 두드리면 트릭 취소)
+       2) 빈 공간을 3초(3000ms) 이상 길게 누름
+       -> 둘 중 하나라도 충족 시 floorTrickArmed = true 설정
     ========================================================== */
     function isEmptyFloorTarget(target) {
       if (!target) return false;
@@ -1106,15 +1120,43 @@
       return true;
     }
 
-    function registerFloorTap() {
+    // 빈 공간 누르기 시작 (연속 두드림 횟수 계산 + 3초 롱프레스 타이머 시작)
+    function handleFloorPressStart() {
       var now = Date.now();
       var diff = now - lastFloorTapTime;
 
-      if (diff > 20 && diff <= 500) {
-        floorDoubleTapped = true;
-        lastFloorTapTime = 0;
+      // 3초 길게 누름 타이머 초기화 및 시작
+      isLongPressTriggered = false;
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+      }
+      longPressTimer = setTimeout(function() {
+        isLongPressTriggered = true;
+        floorTrickArmed = true; // 3초 이상 길게 누르면 히든트릭 즉시 작동!
+        floorTapCount = 0;
+      }, 2000);
+
+      // 연속 탭(두드림) 간격 체크 (550ms 이내 연속 탭 인정)
+      if (diff > 20 && diff <= 550) {
+        floorTapCount += 1;
       } else {
-        lastFloorTapTime = now;
+        floorTapCount = 1;
+      }
+      lastFloorTapTime = now;
+
+      // 정확히 2번 두드렸을 때만 트릭 작동, 3번 이상 두드리면 트릭 작동 안 함(해제)
+      if (floorTapCount === 2) {
+        floorTrickArmed = true;
+      } else if (floorTapCount >= 3) {
+        floorTrickArmed = false;
+      }
+    }
+
+    // 빈 공간에서 손을 떼거나 취소했을 때 (3초가 되기 전에 떼면 롱프레스 타이머만 해제)
+    function handleFloorPressEnd() {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
       }
     }
 
@@ -1122,28 +1164,51 @@
       var gameScreen = document.getElementById('gameScreen');
       var floor = document.getElementById('bombFloor');
 
-      // 1. 모바일 터치 감지
+      // 1. 모바일 터치 감지 (touchstart / touchend / touchcancel / touchmove)
       gameScreen.addEventListener('touchstart', function(e) {
-        if (!isEmptyFloorTarget(e.target)) return;
+        if (!isEmptyFloorTarget(e.target)) {
+          handleFloorPressEnd();
+          return;
+        }
+        // 멀티터치 시에는 롱프레스 타이머 취소
+        if (e.touches && e.touches.length > 1) {
+          handleFloorPressEnd();
+          return;
+        }
         lastTouchRecordTime = Date.now();
-        registerFloorTap();
+        handleFloorPressStart();
       }, { passive: true });
 
-      // 2. 포인터/마우스 클릭 감지 (터치 직후 발생하는 중복 마우스 이벤트는 무시)
+      gameScreen.addEventListener('touchend', function() {
+        handleFloorPressEnd();
+      }, { passive: true });
+
+      gameScreen.addEventListener('touchcancel', function() {
+        handleFloorPressEnd();
+      }, { passive: true });
+
+      // 2. 마우스/포인터 감지 (모바일 터치 직후 발생하는 중복 이벤트는 무시)
       gameScreen.addEventListener('pointerdown', function(e) {
         if (e.pointerType === 'touch') return;
         if (Date.now() - lastTouchRecordTime < 450) return;
-        if (!isEmptyFloorTarget(e.target)) return;
-        registerFloorTap();
+        if (!isEmptyFloorTarget(e.target)) {
+          handleFloorPressEnd();
+          return;
+        }
+        handleFloorPressStart();
       });
 
-      // 3. PC 브라우저 더블클릭 이벤트 직접 호환
-      gameScreen.addEventListener('dblclick', function(e) {
-        if (!isEmptyFloorTarget(e.target)) return;
-        floorDoubleTapped = true;
+      gameScreen.addEventListener('pointerup', function(e) {
+        if (e.pointerType === 'touch') return;
+        handleFloorPressEnd();
       });
 
-      // 4. 갤럭시 폴드 7 접기/펼치기 등 화면 크기 변경 시 화면 밖 폭탄 자동 재배치
+      gameScreen.addEventListener('pointercancel', function(e) {
+        if (e.pointerType === 'touch') return;
+        handleFloorPressEnd();
+      });
+
+      // 3. 갤럭시 폴드 7 접기/펼치기 등 화면 크기 변경 시 화면 밖 폭탄 자동 재배치
       window.addEventListener('resize', function() {
         if (activeBombs.length === 0) return;
         var rect = floor.getBoundingClientRect();
@@ -1172,14 +1237,16 @@
       if (isBombExploding) return;
       isBombExploding = true;
 
+      // 진행 중인 롱프레스 타이머가 있다면 종료
+      handleFloorPressEnd();
+
       playSoundEffect('firework');
       createFireworkBurstEffect(bombEl);
 
       var selectedPenalty = null;
 
       if (isHiddenMode) {
-        // 히든모드(벌칙 숫자 노란색)일 때:
-        // 1번 벌칙('축 통과')이 아직 남아있는지 확인
+        // 히든모드일 때: 1번 벌칙('축 통과')이 아직 남아있는지 확인
         var firstIdx = -1;
         for (var i = 0; i < remainingPenalties.length; i++) {
           if (remainingPenalties[i].num === 1) {
@@ -1189,15 +1256,15 @@
         }
 
         if (firstIdx !== -1) {
-          // 조건 A: 빈 바닥을 두 번 두드린 후 폭탄을 눌렀거나
-          // 조건 B: 마지막 1개가 남을 때까지 빈 바닥을 두 번 누르지 않은 경우
-          // -> 무조건 1번 벌칙('축 통과') 당첨!
-          if (floorDoubleTapped || remainingPenalties.length === 1) {
+          // 조건 A: 빈 공간을 정확히 2번 두드렸거나(3번 이상 아님), 3초 이상 길게 누른 후 첫 폭탄을 눌렀을 때
+          // 조건 B: 트릭 동작 없이 마지막 1개의 폭탄만 남았을 때
+          // -> 무조건 1번 벌칙('축 통과') 수행!
+          if (floorTrickArmed || remainingPenalties.length === 1) {
             selectedPenalty = remainingPenalties.splice(firstIdx, 1)[0];
-            floorDoubleTapped = false;
+            resetTrickTriggers();
           } else {
-            // 아직 바닥을 두드리지 않았고 폭탄도 2개 이상 남아있다면,
-            // 1번 벌칙은 절대 나오지 않게 아껴두고 나머지(2번~N번) 중에서만 랜덤 선택
+            // 트릭 동작이 없었고 폭탄이 2개 이상 남아있다면
+            // 1번 벌칙은 맨 마지막에 나오도록 아껴두고 나머지(2번~N번) 중에서만 무작위 선택
             var otherPool = [];
             for (var j = 0; j < remainingPenalties.length; j++) {
               if (remainingPenalties[j].num !== 1) {
@@ -1206,16 +1273,17 @@
             }
             var pickIdx = otherPool[Math.floor(Math.random() * otherPool.length)];
             selectedPenalty = remainingPenalties.splice(pickIdx, 1)[0];
+            resetTrickTriggers();
           }
         } else {
-          // 1번 벌칙이 이미 앞에서 나왔다면 남은 벌칙 중 무작위 선택
+          // 이미 앞에서 1번 벌칙이 나왔다면 남은 벌칙 중에서 무작위 선택
           var rIdx = Math.floor(Math.random() * remainingPenalties.length);
           selectedPenalty = remainingPenalties.splice(rIdx, 1)[0];
-          floorDoubleTapped = false;
+          resetTrickTriggers();
         }
       } else {
-        // 일반모드(벌칙 숫자 녹색)일 때: 완전 무작위
-        floorDoubleTapped = false;
+        // 일반모드일 때: 완전 무작위 선택
+        resetTrickTriggers();
         var randIdx = Math.floor(Math.random() * remainingPenalties.length);
         selectedPenalty = remainingPenalties.splice(randIdx, 1)[0];
       }
@@ -1331,6 +1399,7 @@
       if (e && e.stopPropagation) e.stopPropagation();
       playSoundEffect('tap');
       isBombExploding = false;
+      resetTrickTriggers();
       document.getElementById('penaltyPopupOverlay').style.display = 'none';
       document.getElementById('restartOverlay').style.display = 'none';
       document.getElementById('gameScreen').style.display = 'none';
