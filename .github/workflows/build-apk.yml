@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Java JDK 17 설정
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 웹 정적 리소스 디렉토리(www) 준비
+        run: |
+          mkdir -p www
+          cp index.html www/
+          # manifest.json 등이 있다면 함께 복사하도록 구성
+
+      - name: 종속성 설치 및 안드로이드 프로젝트 생성
+        run: |
+          npm install
+          npx cap add android
+          npx cap sync android
+
+      - name: APK 빌드 (Debug)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: 생성된 APK 파일 아티팩트로 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: BombGame-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
