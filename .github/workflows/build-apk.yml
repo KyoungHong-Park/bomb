@@ -1,9 +1,12 @@
-name: Build Android APK
+name: Build and Release Android APK
 
 on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -28,7 +31,6 @@ jobs:
         run: |
           mkdir -p www
           cp index.html www/
-          # manifest.json 등이 있다면 함께 복사하도록 구성
 
       - name: 종속성 설치 및 안드로이드 프로젝트 생성
         run: |
@@ -40,10 +42,16 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug -PversionCode=${{ github.run_number }} -PversionName="1.0.${{ github.run_number }}"
 
-      - name: 생성된 APK 파일 아티팩트로 업로드
-        uses: actions/upload-artifact@v4
+      - name: APK 파일 이름 변경 (bomb-game.apk)
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk ./bomb-game.apk
+
+      - name: GitHub Releases에 최신 APK 자동 게시
+        uses: softprops/action-gh-release@v2
         with:
-          name: BombGame-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          tag_name: latest
+          name: "복불복 폭탄게임 최신 버전"
+          files: ./bomb-game.apk
+          prerelease: false
