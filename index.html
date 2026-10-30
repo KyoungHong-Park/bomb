@@ -796,8 +796,8 @@
     var floorTrickArmed = false;      // true일 때 다음 첫 번째 폭탄에서 무조건 1번 벌칙 당첨
     var floorTapCount = 0;            // 빈 공간 연속 두드림 횟수 (2번일 때만 발동, 3번 이상이면 취소)
     var lastFloorTapTime = 0;         // 마지막으로 빈 공간을 두드린 시각
-    var longPressTimer = null;        // 3초(3000ms) 길게 누름 감지 타이머
-    var isLongPressTriggered = false; // 3초 길게 누름이 달성되었는지 여부
+    var longPressTimer = null;        // 1초(1000ms) 길게 누름 감지 타이머
+    var isLongPressTriggered = false; // 1초 길게 누름이 달성되었는지 여부
     var lastTouchRecordTime = 0;      // 모바일 터치 후 중복 포인터 이벤트 방지용
 
     function resetTrickTriggers() {
@@ -1093,7 +1093,7 @@
     /* ==========================================================
        빈 나무 바닥 히든트릭 감지
        1) 빈 공간을 정확히 2번 두드림 (3번 이상 연속으로 두드리면 트릭 취소)
-       2) 빈 공간을 3초(3000ms) 이상 길게 누름
+       2) 빈 공간을 1초(3000ms) 이상 길게 누름
        -> 둘 중 하나라도 충족 시 floorTrickArmed = true 설정
     ========================================================== */
     function isEmptyFloorTarget(target) {
@@ -1120,7 +1120,7 @@
       return true;
     }
 
-    // 빈 공간 누르기 시작 (연속 두드림 횟수 계산 + 3초 롱프레스 타이머 시작)
+    // 빈 공간 누르기 시작 (연속 두드림 횟수 계산 + 1초 롱프레스 타이머 시작)
     function handleFloorPressStart() {
       var now = Date.now();
       var diff = now - lastFloorTapTime;
@@ -1132,9 +1132,9 @@
       }
       longPressTimer = setTimeout(function() {
         isLongPressTriggered = true;
-        floorTrickArmed = true; // 3초 이상 길게 누르면 히든트릭 즉시 작동!
+        floorTrickArmed = true; // 1초 이상 길게 누르면 히든트릭 즉시 작동!
         floorTapCount = 0;
-      }, 2000);
+      }, 1000);
 
       // 연속 탭(두드림) 간격 체크 (550ms 이내 연속 탭 인정)
       if (diff > 20 && diff <= 550) {
